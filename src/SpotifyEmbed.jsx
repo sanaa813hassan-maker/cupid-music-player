@@ -8,13 +8,14 @@
  * Activated automatically when the URL contains ?spotify=<id>
  *
  * Supported values for `spotifyId`:
- *   - Track ID:   6dBUzqjtbnIa1TwYbyw5CM
- *   - Full URI:   spotify:track:6dBUzqjtbnIa1TwYbyw5CM
- *   - Short URL:  https://open.spotify.com/track/6dBUzqjtbnIa1TwYbyw5CM
- *   - Embed URL:  https://open.spotify.com/embed/track/6dBUzqjtbnIa1TwYbyw5CM
+ *   - Bare Track ID:   6dBUzqjtbnIa1TwYbyw5CM
+ *   - Spotify URI:     spotify:track:6dBUzqjtbnIa1TwYbyw5CM
+ *   - Standard URL:    https://open.spotify.com/track/ID
+ *   - Localised URL:   https://open.spotify.com/intl-ar/track/ID?si=xxx
+ *   - Embed URL:       https://open.spotify.com/embed/track/ID
  *
  * Usage in your site:
- *   <iframe src="https://your-cupid-deployment.vercel.app/?spotify=6dBUzqjtbnIa1TwYbyw5CM"
+ *   <iframe src="https://cupid-music-player-chi.vercel.app/?spotify=6dBUzqjtbnIa1TwYbyw5CM"
  *           width="100%" height="352" frameBorder="0"
  *           allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
  *           style="border-radius:12px" loading="lazy">
@@ -23,63 +24,70 @@
 
 import { useMemo } from 'react';
 
+// Spotify content types we can embed
+const SPOTIFY_TYPES = new Set(['track', 'album', 'playlist', 'artist', 'episode', 'show']);
+
 /**
- * Parse any Spotify reference into an embed URL.
- * Returns null if we can't figure it out.
+ * Parse any Spotify reference into a clean embed URL.
+ * Handles locale segments like /intl-ar/, /intl-en/ etc.
  */
 function toEmbedUrl(raw) {
   if (!raw) return null;
   const s = raw.trim();
 
-  // Already a full embed URL — use as-is (strip extra query params to keep it clean)
+  // 1. Already an embed URL
   if (s.includes('open.spotify.com/embed/')) {
     try {
       const u = new URL(s);
-      // Keep the si param if present, strip everything else
-      const si = u.searchParams.get('si');
-      return `https://open.spotify.com/embed${u.pathname}${si ? `?si=${si}` : ''}`;
+      return 'https://open.spotify.com/embed' + u.pathname;
     } catch {
       return s;
     }
   }
 
-  // Full open.spotify.com URL  →  extract type + id
+  // 2. Any open.spotify.com URL — handles /intl-ar/, /intl-en/, bare paths
   if (s.includes('open.spotify.com/')) {
     try {
       const u = new URL(s);
-      // pathname looks like /track/ID or /album/ID etc.
-      const parts = u.pathname.split('/').filter(Boolean);
-      if (parts.length >= 2) {
-        return `https://open.spotify.com/embed/${parts[0]}/${parts[1]}`;
+      // Drop locale segments like "intl-ar", "intl-en" from the path
+      const parts = u.pathname
+        .split('/')
+        .filter(function(seg) { return seg.length > 0 && !seg.startsWith('intl-'); });
+
+      // Expecting ['track','ID'] or ['album','ID'] etc.
+      if (parts.length >= 2 && SPOTIFY_TYPES.has(parts[0])) {
+        return 'https://open.spotify.com/embed/' + parts[0] + '/' + parts[1];
       }
-    } catch { /* fall through */ }
+      // Just an ID with no type
+      if (parts.length === 1) {
+        return 'https://open.spotify.com/embed/track/' + parts[0];
+      }
+    } catch (e) { /* fall through */ }
   }
 
-  // URI  →  spotify:track:ID  or  spotify:album:ID etc.
+  // 3. Spotify URI  →  spotify:track:ID
   if (s.startsWith('spotify:')) {
     const parts = s.split(':');
-    if (parts.length >= 3) {
-      return `https://open.spotify.com/embed/${parts[1]}/${parts[2]}`;
+    if (parts.length >= 3 && SPOTIFY_TYPES.has(parts[1])) {
+      return 'https://open.spotify.com/embed/' + parts[1] + '/' + parts[2];
     }
   }
 
-  // Bare ID — assume it's a track (most common embed use-case)
-  // A Spotify ID is 22 alphanumeric chars, but we'll accept anything
-  // that doesn't look like a URL/URI and forward it as a track id.
-  if (!s.includes('/') && !s.includes(':')) {
-    return `https://open.spotify.com/embed/track/${s}`;
+  // 4. Bare ID — no slashes, no colons, looks like a Spotify ID
+  if (!s.includes('/') && !s.includes(':') && s.length > 10) {
+    return 'https://open.spotify.com/embed/track/' + s;
   }
 
   return null;
 }
 
 export default function SpotifyEmbed({ spotifyId }) {
-  const embedUrl = useMemo(() => toEmbedUrl(spotifyId), [spotifyId]);
+  const embedUrl = useMemo(function() { return toEmbedUrl(spotifyId); }, [spotifyId]);
 
   if (!embedUrl) {
     return (
       <div style={styles.error}>
-        <p>⚠️ Couldn't parse Spotify ID:</p>
+        <p>Could not parse Spotify ID:</p>
         <code style={styles.code}>{spotifyId}</code>
         <p style={styles.hint}>
           Pass a track ID, Spotify URI, or open.spotify.com URL as the{' '}
@@ -110,11 +118,11 @@ const styles = {
   wrapper: {
     width: '100%',
     height: '100%',
-    minHeight: '152px',   // Spotify compact embed minimum
+    minHeight: '152px',
     display: 'flex',
     alignItems: 'stretch',
     justifyContent: 'stretch',
-    background: '#000',   // Spotify's own bg — prevents white flash
+    background: '#000',
     borderRadius: 'inherit',
     overflow: 'hidden',
   },
